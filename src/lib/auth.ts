@@ -63,13 +63,14 @@ const credentialsSchema = z.object({
 export const signup = createServerFn({ method: 'POST' })
   .inputValidator(credentialsSchema)
   .handler(async ({ data }) => {
-    const existing = await db.query.users.findFirst({ where: eq(users.email, data.email) })
+    const normalizedEmail = data.email.toLowerCase()
+    const existing = await db.query.users.findFirst({ where: eq(users.email, normalizedEmail) })
     if (existing) throw new Error('Account already exists for this email.')
 
     const identity = await ensureIdentity(data.deviceId)
     const [created] = await db
       .insert(users)
-      .values({ email: data.email.toLowerCase(), passwordHash: hashPassword(data.password), identityId: identity.id })
+      .values({ email: normalizedEmail, passwordHash: hashPassword(data.password), identityId: identity.id })
       .returning()
 
     const session = await createSession(created.id)
