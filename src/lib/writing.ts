@@ -5,15 +5,10 @@ import { computeStreaks, determineNewBadges } from './badge-engine'
 import { assertIsoDate, assertTodayLocalConsistent, countWords, isDateLocked } from './writing-rules'
 import { db } from './db'
 import { badges, entries, identities, identityBadges, prompts, sessions, users } from './schema'
+import { ensureIdentity } from './identity'
+import { CONFIG } from './config'
 
-async function ensureIdentity(deviceId: string) {
-  const existing = await db.query.identities.findFirst({ where: eq(identities.deviceId, deviceId) })
-  if (existing) return existing
-  const [created] = await db.insert(identities).values({ deviceId }).returning()
-  return created
-}
-
-async function resolveIdentity(deviceId: string, sessionToken?: string) {
+async function resolveIdentity(deviceId: string, sessionToken?: string): Promise<typeof identities.$inferSelect> {
   const guestIdentity = await ensureIdentity(deviceId)
 
   if (!sessionToken) return guestIdentity
@@ -30,10 +25,21 @@ async function resolveIdentity(deviceId: string, sessionToken?: string) {
 }
 
 const baseInput = {
-  sessionToken: z.string().min(10).optional(),
-  deviceId: z.string().min(12),
+  sessionToken: z.string().min(CONFIG.SESSION_TOKEN_MIN_LENGTH).optional(),
+  deviceId: z.string().min(CONFIG.DEVICE_ID_MIN_LENGTH),
 }
 
+/**
+ * Retrieve prompt and entry data for a specific date.
+ * 
+ * @param localDate - Date in YYYY-MM-DD format
+ * @param todayLocal - Current local date in YYYY-MM-DD format
+ * @param timezone - IANA timezone identifier
+ * @param clientNowIso - Current time in ISO format
+ * @param deviceId - Device identifier
+ * @param sessionToken - Optional session token
+ * @returns Prompt, entry, and lock status for the requested date
+ */
 export const getDayData = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
@@ -65,7 +71,13 @@ export const getDayData = createServerFn({ method: 'GET' })
     }
   })
 
-async function awardBadges(identityId: string, latestWordCount: number) {
+async function awardBadges(identityId: string, latestWordCount: number): Promise<{
+  totalEntries: number
+  totalWords: number
+  currentStreak: number
+  longestStreak: number
+  newBadges: string[]
+}> {
   const awarded = new Set<string>()
   const current = await db
     .select({ key: badges.key })
@@ -106,6 +118,14 @@ async function awardBadges(identityId: string, latestWordCount: number) {
   return { totalEntries, totalWords, currentStreak, longestStreak, newBadges: toAward }
 }
 
+/**
+ * Core logic for saving a writing entry.
+ * Can be called directly from scripts or via the saveEntry server function.
+ * 
+ * @param data - Entry data including date, content, timezone, and identity info
+ * @returns Saved entry and progress statistics (badges, streaks, word counts)
+ * @throws Error if date is locked, word count exceeds limit, or validation fails
+ */
 export async function saveEntryCore(data: {
   localDate: string
   todayLocal: string
@@ -123,8 +143,8 @@ export async function saveEntryCore(data: {
   }
 
   const wordCount = countWords(data.content)
-  if (wordCount > 3000) {
-    throw new Error('Entry exceeds 3000-word limit.')
+  if (wordCount > CONFIG.WORD_LIMIT_PER_ENTRY) {
+    throw new Error(`Entry exceeds ${CONFIG.WORD_LIMIT_PER_ENTRY}-word limit.`)
   }
 
   const identity = await resolveIdentity(data.deviceId, data.sessionToken)
@@ -158,6 +178,19 @@ export async function saveEntryCore(data: {
   return { entry: result, progress }
 }
 
+/**
+ * Save or update a writing entry for the current day.
+ * 
+ * @param localDate - Date in YYYY-MM-DD format (must be today)
+ * @param todayLocal - Current local date in YYYY-MM-DD format
+ * @param timezone - IANA timezone identifier
+ * @param clientNowIso - Current time in ISO format
+ * @param content - Entry content (max 3000 words)
+ * @param deviceId - Device identifier
+ * @param sessionToken - Optional session token
+ * @returns Saved entry and progress statistics
+ * @throws Error if date is locked or word count exceeds limit
+ */
 export const saveEntry = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
@@ -165,7 +198,7 @@ export const saveEntry = createServerFn({ method: 'POST' })
       todayLocal: z.string(),
       timezone: z.string().min(1),
       clientNowIso: z.string().min(10),
-      content: z.string().max(30000),
+      content: z.string().max(CONFIG.WORD_LIMIT_PER_ENTRY * 10),
       ...baseInput,
     }),
   )
@@ -173,6 +206,14 @@ export const saveEntry = createServerFn({ method: 'POST' })
     return saveEntryCore(data)
   })
 
+/**
+ * Retrieve dashboard statistics and writing history.
+ * 
+ * @param fromDate - Start date for filtering entries (YYYY-MM-DD)
+ * @param deviceId - Device identifier
+ * @param sessionToken - Optional session token
+ * @returns Total words, days written, streaks, daily breakdown, and badges
+ */
 export const getDashboard = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
@@ -213,6 +254,13 @@ export const getDashboard = createServerFn({ method: 'GET' })
   })
 
 
+/**
+ * Export all entries as formatted Markdown.
+ * 
+ * @param deviceId - Device identifier
+ * @param sessionToken - Optional session token
+ * @returns Markdown-formatted export of all entries
+ */
 export const exportEntriesMarkdown = createServerFn({ method: 'GET' })
   .inputValidator(z.object(baseInput))
   .handler(async ({ data }) => {
@@ -245,6 +293,13 @@ export const exportEntriesMarkdown = createServerFn({ method: 'GET' })
     return { markdown: lines.join('\n') }
   })
 
+/**
+ * Export all entries as JSON.
+ * 
+ * @param deviceId - Device identifier
+ * @param sessionToken - Optional session token
+ * @returns JSON export with metadata and all entries
+ */
 export const exportEntries = createServerFn({ method: 'GET' })
   .inputValidator(z.object(baseInput))
   .handler(async ({ data }) => {

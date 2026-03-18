@@ -57,6 +57,8 @@ const ddlStatements = [
     awarded_at timestamptz not null default now(),
     unique (identity_id, badge_id)
   );`,
+  `create index if not exists idx_sessions_expires_at on sessions(expires_at);`,
+  `create index if not exists idx_identity_badges_identity_id on identity_badges(identity_id);`,
 ]
 
 await sql.begin(async (tx) => {
