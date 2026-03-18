@@ -73,6 +73,8 @@ function WriteSparkPage() {
   const [dashboard, setDashboard] = useState<null | {
     totalWords: number
     totalDaysWritten: number
+    currentStreak: number
+    longestStreak: number
     byDay: { date: string; wordCount: number }[]
     badges: { key: string; name: string; description: string; awardedAt: Date }[]
   }>(null)
@@ -268,6 +270,8 @@ function WriteSparkPage() {
             <li>Total words: {dashboard?.totalWords ?? 0}</li>
             <li>Days written: {dashboard?.totalDaysWritten ?? 0}</li>
             <li>Current timezone: {timezone}</li>
+            <li>Current streak: {dashboard?.currentStreak ?? 0}</li>
+            <li>Longest streak: {dashboard?.longestStreak ?? 0}</li>
           </ul>
           <div className="mt-3 max-h-44 overflow-auto rounded border p-2 text-sm">
             {(dashboard?.byDay ?? []).map((d) => (

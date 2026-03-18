@@ -74,7 +74,10 @@ await sql.begin(async (tx) => {
       ('streak_7', '1 Week Streak', 'Wrote for 7 consecutive days.'),
       ('streak_10', '10 Day Streak', 'Wrote for 10 consecutive days.'),
       ('single_1000', '1000 Words', 'Wrote at least 1000 words in one entry.'),
-      ('single_2000', '2000 Words', 'Wrote at least 2000 words in one entry.')
+      ('single_2000', '2000 Words', 'Wrote at least 2000 words in one entry.'),
+      ('total_5000', '5000 Total Words', 'Reached 5000 total words.'),
+      ('total_10000', '10000 Total Words', 'Reached 10000 total words.'),
+      ('entries_30', '30 Writing Days', 'Completed writing on 30 days.')
     on conflict (key) do nothing;
   `
 })
