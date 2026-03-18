@@ -97,7 +97,7 @@ function WriteSparkPage() {
 
     const load = async () => {
       const day = await getDayDataFn({
-        data: { localDate: requestedDate, todayLocal: today, deviceId, sessionToken: sessionToken ?? undefined },
+        data: { localDate: requestedDate, todayLocal: today, timezone, clientNowIso: new Date().toISOString(), deviceId, sessionToken: sessionToken ?? undefined },
       })
       setIsLocked(day.isLocked)
       setPromptTitle(day.prompt?.title ?? 'Prompt unavailable')
@@ -111,7 +111,7 @@ function WriteSparkPage() {
     }
 
     void load()
-  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, today])
+  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, timezone, today])
 
   useEffect(() => {
     if (!deviceId || isLocked) return
@@ -126,6 +126,7 @@ function WriteSparkPage() {
             timezone,
             content,
             deviceId,
+            clientNowIso: new Date().toISOString(),
             sessionToken: sessionToken ?? undefined,
           },
         })

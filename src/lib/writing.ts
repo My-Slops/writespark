@@ -1,11 +1,9 @@
 import { and, asc, eq, gte, gt, sql } from 'drizzle-orm'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-import { countWords, isDateLocked } from './writing-rules'
+import { assertIsoDate, assertTodayLocalConsistent, countWords, isDateLocked } from './writing-rules'
 import { db } from './db'
 import { badges, entries, identities, identityBadges, prompts, sessions, users } from './schema'
-
-const dateRegex = /^\d{4}-\d{2}-\d{2}$/
 
 async function ensureIdentity(deviceId: string) {
   const existing = await db.query.identities.findFirst({ where: eq(identities.deviceId, deviceId) })
@@ -38,12 +36,17 @@ const baseInput = {
 export const getDayData = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
-      localDate: z.string().regex(dateRegex),
-      todayLocal: z.string().regex(dateRegex),
+      localDate: z.string(),
+      todayLocal: z.string(),
+      timezone: z.string().min(1),
+      clientNowIso: z.string().min(10),
       ...baseInput,
     }),
   )
   .handler(async ({ data }) => {
+    assertIsoDate(data.localDate, 'localDate')
+    assertTodayLocalConsistent({ todayLocal: data.todayLocal, timezone: data.timezone, clientNowIso: data.clientNowIso })
+
     const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
     const prompt = await db.query.prompts.findFirst({ where: eq(prompts.promptDate, data.localDate) })
@@ -119,14 +122,18 @@ async function awardBadges(identityId: string, latestWordCount: number) {
 export const saveEntry = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
-      localDate: z.string().regex(dateRegex),
-      todayLocal: z.string().regex(dateRegex),
+      localDate: z.string(),
+      todayLocal: z.string(),
       timezone: z.string().min(1),
+      clientNowIso: z.string().min(10),
       content: z.string().max(30000),
       ...baseInput,
     }),
   )
   .handler(async ({ data }) => {
+    assertIsoDate(data.localDate, 'localDate')
+    assertTodayLocalConsistent({ todayLocal: data.todayLocal, timezone: data.timezone, clientNowIso: data.clientNowIso })
+
     if (isDateLocked(data.localDate, data.todayLocal)) {
       throw new Error('You can only write for the current local day. Past days are locked.')
     }
@@ -170,7 +177,7 @@ export const saveEntry = createServerFn({ method: 'POST' })
 export const getDashboard = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
-      fromDate: z.string().regex(dateRegex),
+      fromDate: z.string(),
       ...baseInput,
     }),
   )
