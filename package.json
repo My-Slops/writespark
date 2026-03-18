@@ -18,7 +18,8 @@
     "db:seed:prompts": "node scripts/seed-prompts.mjs",
     "prompts:validate": "node scripts/validate-prompts.mjs",
     "startup:check": "node scripts/startup-check.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "repro:save": "tsx scripts/repro-save.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -51,6 +52,7 @@
     "drizzle-kit": "^0.31.10",
     "jsdom": "^28.1.0",
     "prettier": "^3.8.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^7.3.1",
     "vite-tsconfig-paths": "^5.1.4",

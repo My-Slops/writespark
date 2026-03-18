@@ -106,6 +106,58 @@ async function awardBadges(identityId: string, latestWordCount: number) {
   return { totalEntries, totalWords, currentStreak, longestStreak, newBadges: toAward }
 }
 
+export async function saveEntryCore(data: {
+  localDate: string
+  todayLocal: string
+  timezone: string
+  clientNowIso: string
+  content: string
+  deviceId: string
+  sessionToken?: string
+}) {
+  assertIsoDate(data.localDate, 'localDate')
+  assertTodayLocalConsistent({ todayLocal: data.todayLocal, timezone: data.timezone, clientNowIso: data.clientNowIso })
+
+  if (isDateLocked(data.localDate, data.todayLocal)) {
+    throw new Error('You can only write for the current local day. Past days are locked.')
+  }
+
+  const wordCount = countWords(data.content)
+  if (wordCount > 3000) {
+    throw new Error('Entry exceeds 3000-word limit.')
+  }
+
+  const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+
+  const existing = await db.query.entries.findFirst({
+    where: and(eq(entries.identityId, identity.id), eq(entries.promptDate, data.localDate)),
+  })
+
+  let result
+  if (existing) {
+    ;[result] = await db
+      .update(entries)
+      .set({ content: data.content, wordCount, timezone: data.timezone, updatedAt: new Date() })
+      .where(eq(entries.id, existing.id))
+      .returning()
+  } else {
+    ;[result] = await db
+      .insert(entries)
+      .values({
+        identityId: identity.id,
+        promptDate: data.localDate,
+        content: data.content,
+        wordCount,
+        timezone: data.timezone,
+        locked: false,
+      })
+      .returning()
+  }
+
+  const progress = await awardBadges(identity.id, wordCount)
+  return { entry: result, progress }
+}
+
 export const saveEntry = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
@@ -118,47 +170,7 @@ export const saveEntry = createServerFn({ method: 'POST' })
     }),
   )
   .handler(async ({ data }) => {
-    assertIsoDate(data.localDate, 'localDate')
-    assertTodayLocalConsistent({ todayLocal: data.todayLocal, timezone: data.timezone, clientNowIso: data.clientNowIso })
-
-    if (isDateLocked(data.localDate, data.todayLocal)) {
-      throw new Error('You can only write for the current local day. Past days are locked.')
-    }
-
-    const wordCount = countWords(data.content)
-    if (wordCount > 3000) {
-      throw new Error('Entry exceeds 3000-word limit.')
-    }
-
-    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
-
-    const existing = await db.query.entries.findFirst({
-      where: and(eq(entries.identityId, identity.id), eq(entries.promptDate, data.localDate)),
-    })
-
-    let result
-    if (existing) {
-      ;[result] = await db
-        .update(entries)
-        .set({ content: data.content, wordCount, timezone: data.timezone, updatedAt: new Date() })
-        .where(eq(entries.id, existing.id))
-        .returning()
-    } else {
-      ;[result] = await db
-        .insert(entries)
-        .values({
-          identityId: identity.id,
-          promptDate: data.localDate,
-          content: data.content,
-          wordCount,
-          timezone: data.timezone,
-          locked: false,
-        })
-        .returning()
-    }
-
-    const progress = await awardBadges(identity.id, wordCount)
-    return { entry: result, progress }
+    return saveEntryCore(data)
   })
 
 export const getDashboard = createServerFn({ method: 'GET' })
