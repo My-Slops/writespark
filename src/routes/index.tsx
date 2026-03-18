@@ -12,14 +12,21 @@ export const Route = createFileRoute('/')({
   component: WriteSparkPage,
 })
 
+function toIsoLocalDate(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function todayLocalDate() {
-  return new Date().toLocaleDateString('en-CA')
+  return toIsoLocalDate(new Date())
 }
 
 function shiftDate(localDate: string, deltaDays: number) {
   const d = new Date(`${localDate}T12:00:00`)
   d.setDate(d.getDate() + deltaDays)
-  return d.toLocaleDateString('en-CA')
+  return toIsoLocalDate(d)
 }
 
 function getOrCreateDeviceId() {
@@ -71,6 +78,7 @@ function WriteSparkPage() {
   const [promptTitle, setPromptTitle] = useState('Prompt unavailable')
   const [promptBody, setPromptBody] = useState('No prompt configured for this date yet.')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<null | {
     totalWords: number
     totalDaysWritten: number
@@ -134,7 +142,16 @@ function WriteSparkPage() {
           },
         })
         setSaveState('saved')
-      } catch {
+        setSaveError(null)
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : typeof error === 'string'
+              ? error
+              : JSON.stringify(error) || 'Unknown save error'
+        console.error('saveEntry failed', error)
+        setSaveError(message)
         setSaveState('error')
       }
     }, 800)
@@ -280,6 +297,7 @@ function WriteSparkPage() {
             {isLocked ? 'Locked' : saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : 'Idle'}
           </span>
         </div>
+        {saveState === 'error' && saveError && <p className="mt-2 text-xs text-red-600">{saveError}</p>}
       </section>
 
       <section className="grid gap-4 md:grid-cols-2">
