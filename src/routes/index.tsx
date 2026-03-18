@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useState } from 'react'
 import { getSessionUser, login, logout, signup } from '../lib/auth'
-import { exportEntries, getDashboard, getDayData, saveEntry } from '../lib/writing'
+import { exportEntries, exportEntriesMarkdown, getDashboard, getDayData, saveEntry } from '../lib/writing'
 import { countWords } from '../lib/writing-rules'
 
 export const Route = createFileRoute('/')({
@@ -53,6 +53,7 @@ function WriteSparkPage() {
   const saveEntryFn = useServerFn(saveEntry)
   const getDashboardFn = useServerFn(getDashboard)
   const exportEntriesFn = useServerFn(exportEntries)
+  const exportEntriesMarkdownFn = useServerFn(exportEntriesMarkdown)
   const signupFn = useServerFn(signup)
   const loginFn = useServerFn(login)
   const logoutFn = useServerFn(logout)
@@ -153,6 +154,19 @@ function WriteSparkPage() {
     URL.revokeObjectURL(url)
   }
 
+
+  const exportMarkdownData = async () => {
+    if (!deviceId) return
+    const data = await exportEntriesMarkdownFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
+    const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `writespark-export-${today}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   const handleAuth = async (mode: 'signup' | 'login') => {
     if (!deviceId) return
     setAuthError(null)
@@ -183,9 +197,14 @@ function WriteSparkPage() {
           <h1 className="text-3xl font-bold">WriteSpark</h1>
           <p className="text-sm opacity-80">Notebook-style daily writing with fixed prompts and local-day locking.</p>
         </div>
-        <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void exportData()}>
-          Export JSON
-        </button>
+        <div className="flex gap-2">
+          <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void exportData()}>
+            Export JSON
+          </button>
+          <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void exportMarkdownData()}>
+            Export Markdown
+          </button>
+        </div>
       </header>
 
       <section className="mb-6 rounded-xl border p-4">
