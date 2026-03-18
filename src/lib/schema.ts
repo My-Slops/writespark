@@ -14,6 +14,14 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const sessions = pgTable('sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  token: text('token').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+})
+
 export const prompts = pgTable('prompts', {
   id: uuid('id').defaultRandom().primaryKey(),
   promptDate: date('prompt_date').notNull().unique(),
