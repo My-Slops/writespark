@@ -14,7 +14,6 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/package.json ./package.json
+COPY . .
 EXPOSE 3000
-CMD ["node", "dist/server/server.js"]
+CMD ["pnpm", "exec", "vite", "dev", "--host", "0.0.0.0", "--port", "3000"]
