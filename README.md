@@ -66,3 +66,7 @@ pnpm db:seed:prompts
 
 ## License
 MIT
+
+
+## CI
+GitHub Actions runs lint, typecheck, tests, and build on PRs and main.
