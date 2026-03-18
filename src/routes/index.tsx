@@ -48,7 +48,6 @@ function WriteSparkPage() {
   const requestedDate = search.date ?? todayLocalDate()
   const today = todayLocalDate()
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-  const clientNowIso = new Date().toISOString()
 
   const getDayDataFn = useServerFn(getDayData)
   const saveEntryFn = useServerFn(saveEntry)
@@ -98,7 +97,7 @@ function WriteSparkPage() {
 
     const load = async () => {
       const day = await getDayDataFn({
-        data: { localDate: requestedDate, todayLocal: today, timezone, clientNowIso, deviceId, sessionToken: sessionToken ?? undefined },
+        data: { localDate: requestedDate, todayLocal: today, timezone, clientNowIso: new Date().toISOString(), deviceId, sessionToken: sessionToken ?? undefined },
       })
       setIsLocked(day.isLocked)
       setPromptTitle(day.prompt?.title ?? 'Prompt unavailable')
@@ -112,7 +111,7 @@ function WriteSparkPage() {
     }
 
     void load()
-  }, [clientNowIso, deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, timezone, today])
+  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, timezone, today])
 
   useEffect(() => {
     if (!deviceId || isLocked) return
@@ -127,7 +126,7 @@ function WriteSparkPage() {
             timezone,
             content,
             deviceId,
-            clientNowIso,
+            clientNowIso: new Date().toISOString(),
             sessionToken: sessionToken ?? undefined,
           },
         })
@@ -138,7 +137,7 @@ function WriteSparkPage() {
     }, 800)
 
     return () => clearTimeout(timeout)
-  }, [clientNowIso, content, deviceId, isLocked, requestedDate, saveEntryFn, sessionToken, timezone, today])
+  }, [content, deviceId, isLocked, requestedDate, saveEntryFn, sessionToken, timezone, today])
 
   const exportData = async () => {
     if (!deviceId) return
