@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, gt, sql } from 'drizzle-orm'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
+import { computeStreaks, determineNewBadges } from './badge-engine'
 import { assertIsoDate, assertTodayLocalConsistent, countWords, isDateLocked } from './writing-rules'
 import { db } from './db'
 import { badges, entries, identities, identityBadges, prompts, sessions, users } from './schema'
@@ -64,8 +65,6 @@ export const getDayData = createServerFn({ method: 'GET' })
     }
   })
 
-type BadgeKey = 'first_entry' | 'streak_7' | 'streak_10' | 'single_1000' | 'single_2000'
-
 async function awardBadges(identityId: string, latestWordCount: number) {
   const awarded = new Set<string>()
   const current = await db
@@ -81,28 +80,12 @@ async function awardBadges(identityId: string, latestWordCount: number) {
     orderBy: asc(entries.promptDate),
   })
 
-  const totalEntries = allEntries.length
-  const totalWords = allEntries.reduce((acc, item) => acc + item.wordCount, 0)
-
-  let streak = 0
-  for (let i = allEntries.length - 1; i >= 0; i--) {
-    if (i === allEntries.length - 1) {
-      streak = 1
-      continue
-    }
-    const currentDate = new Date(allEntries[i + 1].promptDate)
-    const prevDate = new Date(allEntries[i].promptDate)
-    const diffDays = (currentDate.getTime() - prevDate.getTime()) / 86400000
-    if (diffDays === 1) streak += 1
-    else break
-  }
-
-  const toAward: BadgeKey[] = []
-  if (totalEntries >= 1 && !awarded.has('first_entry')) toAward.push('first_entry')
-  if (streak >= 7 && !awarded.has('streak_7')) toAward.push('streak_7')
-  if (streak >= 10 && !awarded.has('streak_10')) toAward.push('streak_10')
-  if (latestWordCount >= 1000 && !awarded.has('single_1000')) toAward.push('single_1000')
-  if (latestWordCount >= 2000 && !awarded.has('single_2000')) toAward.push('single_2000')
+  const normalizedEntries = allEntries.map((e) => ({ promptDate: e.promptDate, wordCount: e.wordCount }))
+  const toAward = determineNewBadges({
+    entries: normalizedEntries,
+    latestWordCount,
+    alreadyAwarded: awarded,
+  })
 
   if (toAward.length > 0) {
     const badgeRows = await db.select().from(badges).where(sql`${badges.key} = ANY(${toAward})`)
@@ -116,7 +99,11 @@ async function awardBadges(identityId: string, latestWordCount: number) {
     }
   }
 
-  return { totalEntries, totalWords, streak, newBadges: toAward }
+  const totalEntries = normalizedEntries.length
+  const totalWords = normalizedEntries.reduce((acc, item) => acc + item.wordCount, 0)
+  const { currentStreak, longestStreak } = computeStreaks(normalizedEntries)
+
+  return { totalEntries, totalWords, currentStreak, longestStreak, newBadges: toAward }
 }
 
 export const saveEntry = createServerFn({ method: 'POST' })
@@ -197,9 +184,14 @@ export const getDashboard = createServerFn({ method: 'GET' })
       .where(eq(identityBadges.identityId, identity.id))
       .orderBy(asc(identityBadges.awardedAt))
 
+    const normalizedEntries = allEntries.map((entry) => ({ promptDate: entry.promptDate, wordCount: entry.wordCount }))
+    const { currentStreak, longestStreak } = computeStreaks(normalizedEntries)
+
     return {
       totalWords,
       totalDaysWritten: allEntries.length,
+      currentStreak,
+      longestStreak,
       byDay: allEntries.map((entry) => ({
         date: entry.promptDate,
         wordCount: entry.wordCount,
