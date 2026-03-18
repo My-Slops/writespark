@@ -27,6 +27,7 @@ WriteSpark is an open-source daily writing web app that removes blank-page frict
 cp .env.example .env
 pnpm install
 pnpm db:init
+pnpm prompts:validate
 pnpm db:seed:prompts
 pnpm dev
 ```
@@ -55,9 +56,10 @@ pnpm start
 > Note: Add your own process manager/reverse proxy (systemd, Docker, nginx, Caddy, etc.) depending on infra preference.
 
 ## Prompt configuration
-Edit `prompts/calendar-prompts.json`, then run:
+Edit `prompts/calendar-prompts.json`, validate, then seed:
 
 ```bash
+pnpm prompts:validate
 pnpm db:seed:prompts
 ```
 
