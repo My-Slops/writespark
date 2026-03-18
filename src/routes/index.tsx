@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useState } from 'react'
+import { getSessionUser, login, logout, signup } from '../lib/auth'
 import { exportEntries, getDashboard, getDayData, saveEntry } from '../lib/writing'
 import { countWords } from '../lib/writing-rules'
 
@@ -31,6 +32,15 @@ function getOrCreateDeviceId() {
   return value
 }
 
+function getSessionToken() {
+  return window.localStorage.getItem('writespark.session_token')
+}
+
+function setSessionToken(token: string | null) {
+  if (token) window.localStorage.setItem('writespark.session_token', token)
+  else window.localStorage.removeItem('writespark.session_token')
+}
+
 function WriteSparkPage() {
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
@@ -43,8 +53,18 @@ function WriteSparkPage() {
   const saveEntryFn = useServerFn(saveEntry)
   const getDashboardFn = useServerFn(getDashboard)
   const exportEntriesFn = useServerFn(exportEntries)
+  const signupFn = useServerFn(signup)
+  const loginFn = useServerFn(login)
+  const logoutFn = useServerFn(logout)
+  const getSessionUserFn = useServerFn(getSessionUser)
 
   const [deviceId, setDeviceId] = useState<string | null>(null)
+  const [sessionToken, setSessionTokenState] = useState<string | null>(null)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [emailInput, setEmailInput] = useState('')
+  const [passwordInput, setPasswordInput] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+
   const [content, setContent] = useState('')
   const [isLocked, setIsLocked] = useState(false)
   const [promptTitle, setPromptTitle] = useState('Prompt unavailable')
@@ -61,24 +81,37 @@ function WriteSparkPage() {
 
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId())
+    setSessionTokenState(getSessionToken())
   }, [])
+
+  useEffect(() => {
+    if (!sessionToken) {
+      setUserEmail(null)
+      return
+    }
+    void getSessionUserFn({ data: { sessionToken } }).then((res) => setUserEmail(res.user?.email ?? null))
+  }, [getSessionUserFn, sessionToken])
 
   useEffect(() => {
     if (!deviceId) return
 
     const load = async () => {
-      const day = await getDayDataFn({ data: { localDate: requestedDate, todayLocal: today, deviceId } })
+      const day = await getDayDataFn({
+        data: { localDate: requestedDate, todayLocal: today, deviceId, sessionToken: sessionToken ?? undefined },
+      })
       setIsLocked(day.isLocked)
       setPromptTitle(day.prompt?.title ?? 'Prompt unavailable')
       setPromptBody(day.prompt?.body ?? 'No prompt configured for this date yet.')
       setContent(day.entry?.content ?? '')
 
-      const dash = await getDashboardFn({ data: { deviceId, fromDate: '2000-01-01' } })
+      const dash = await getDashboardFn({
+        data: { deviceId, fromDate: '2000-01-01', sessionToken: sessionToken ?? undefined },
+      })
       setDashboard(dash)
     }
 
     void load()
-  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, today])
+  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, today])
 
   useEffect(() => {
     if (!deviceId || isLocked) return
@@ -93,6 +126,7 @@ function WriteSparkPage() {
             timezone,
             content,
             deviceId,
+            sessionToken: sessionToken ?? undefined,
           },
         })
         setSaveState('saved')
@@ -102,11 +136,11 @@ function WriteSparkPage() {
     }, 800)
 
     return () => clearTimeout(timeout)
-  }, [content, deviceId, isLocked, requestedDate, saveEntryFn, timezone, today])
+  }, [content, deviceId, isLocked, requestedDate, saveEntryFn, sessionToken, timezone, today])
 
   const exportData = async () => {
     if (!deviceId) return
-    const data = await exportEntriesFn({ data: { deviceId } })
+    const data = await exportEntriesFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -114,6 +148,29 @@ function WriteSparkPage() {
     anchor.download = `writespark-export-${today}.json`
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleAuth = async (mode: 'signup' | 'login') => {
+    if (!deviceId) return
+    setAuthError(null)
+    try {
+      const fn = mode === 'signup' ? signupFn : loginFn
+      const result = await fn({ data: { email: emailInput, password: passwordInput, deviceId } })
+      setSessionToken(result.session.token)
+      setSessionTokenState(result.session.token)
+      setUserEmail(result.user.email)
+      setPasswordInput('')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Authentication failed.')
+    }
+  }
+
+  const handleLogout = async () => {
+    if (!sessionToken) return
+    await logoutFn({ data: { sessionToken } })
+    setSessionToken(null)
+    setSessionTokenState(null)
+    setUserEmail(null)
   }
 
   return (
@@ -127,6 +184,42 @@ function WriteSparkPage() {
           Export JSON
         </button>
       </header>
+
+      <section className="mb-6 rounded-xl border p-4">
+        <h2 className="mb-2 text-lg font-semibold">Account</h2>
+        {!userEmail ? (
+          <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto]">
+            <input
+              type="email"
+              placeholder="email"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              className="rounded border px-3 py-2"
+            />
+            <input
+              type="password"
+              placeholder="password (min 8 chars)"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="rounded border px-3 py-2"
+            />
+            <button className="rounded border px-3 py-2" onClick={() => void handleAuth('signup')}>
+              Sign up
+            </button>
+            <button className="rounded border px-3 py-2" onClick={() => void handleAuth('login')}>
+              Log in
+            </button>
+            {authError && <p className="md:col-span-4 text-sm text-red-600">{authError}</p>}
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <p className="text-sm">Signed in as {userEmail}</p>
+            <button className="rounded border px-3 py-2 text-sm" onClick={() => void handleLogout()}>
+              Log out
+            </button>
+          </div>
+        )}
+      </section>
 
       <section className="mb-4 flex items-center gap-2">
         <button className="rounded border px-3 py-1" onClick={() => navigate({ search: { date: shiftDate(requestedDate, -1) } })}>

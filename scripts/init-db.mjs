@@ -20,6 +20,16 @@ await sql.begin(async (tx) => {
       created_at timestamptz not null default now()
     );
 
+
+
+    create table if not exists sessions (
+      id uuid primary key default gen_random_uuid(),
+      user_id uuid not null references users(id),
+      token text not null unique,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null
+    );
+
     create table if not exists prompts (
       id uuid primary key default gen_random_uuid(),
       prompt_date date not null unique,

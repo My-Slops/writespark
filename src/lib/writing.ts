@@ -1,32 +1,50 @@
-import { and, asc, eq, gte, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, gt, sql } from 'drizzle-orm'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { countWords, isDateLocked } from './writing-rules'
 import { db } from './db'
-import { badges, entries, identities, identityBadges, prompts } from './schema'
+import { badges, entries, identities, identityBadges, prompts, sessions, users } from './schema'
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/
 
+async function ensureIdentity(deviceId: string) {
+  const existing = await db.query.identities.findFirst({ where: eq(identities.deviceId, deviceId) })
+  if (existing) return existing
+  const [created] = await db.insert(identities).values({ deviceId }).returning()
+  return created
+}
 
-const ensureIdentity = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ deviceId: z.string().min(12) }))
-  .handler(async ({ data }) => {
-    const existing = await db.query.identities.findFirst({ where: eq(identities.deviceId, data.deviceId) })
-    if (existing) return existing
-    const [created] = await db.insert(identities).values({ deviceId: data.deviceId }).returning()
-    return created
+async function resolveIdentity(deviceId: string, sessionToken?: string) {
+  const guestIdentity = await ensureIdentity(deviceId)
+
+  if (!sessionToken) return guestIdentity
+
+  const session = await db.query.sessions.findFirst({
+    where: and(eq(sessions.token, sessionToken), gt(sessions.expiresAt, new Date())),
   })
+  if (!session) return guestIdentity
+
+  const user = await db.query.users.findFirst({ where: eq(users.id, session.userId) })
+  if (!user?.identityId) return guestIdentity
+
+  return (await db.query.identities.findFirst({ where: eq(identities.id, user.identityId) })) ?? guestIdentity
+}
+
+const baseInput = {
+  sessionToken: z.string().min(10).optional(),
+  deviceId: z.string().min(12),
+}
 
 export const getDayData = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
       localDate: z.string().regex(dateRegex),
       todayLocal: z.string().regex(dateRegex),
-      deviceId: z.string().min(12),
+      ...baseInput,
     }),
   )
   .handler(async ({ data }) => {
-    const identity = await ensureIdentity({ data: { deviceId: data.deviceId } })
+    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
     const prompt = await db.query.prompts.findFirst({ where: eq(prompts.promptDate, data.localDate) })
     const entry = await db.query.entries.findFirst({
@@ -43,9 +61,7 @@ export const getDayData = createServerFn({ method: 'GET' })
     }
   })
 
-const awardableBadgeKeys = ['first_entry', 'streak_7', 'streak_10', 'single_1000', 'single_2000'] as const
-
-type BadgeKey = (typeof awardableBadgeKeys)[number]
+type BadgeKey = 'first_entry' | 'streak_7' | 'streak_10' | 'single_1000' | 'single_2000'
 
 async function awardBadges(identityId: string, latestWordCount: number) {
   const awarded = new Set<string>()
@@ -107,7 +123,7 @@ export const saveEntry = createServerFn({ method: 'POST' })
       todayLocal: z.string().regex(dateRegex),
       timezone: z.string().min(1),
       content: z.string().max(30000),
-      deviceId: z.string().min(12),
+      ...baseInput,
     }),
   )
   .handler(async ({ data }) => {
@@ -120,7 +136,7 @@ export const saveEntry = createServerFn({ method: 'POST' })
       throw new Error('Entry exceeds 3000-word limit.')
     }
 
-    const identity = await ensureIdentity({ data: { deviceId: data.deviceId } })
+    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
     const existing = await db.query.entries.findFirst({
       where: and(eq(entries.identityId, identity.id), eq(entries.promptDate, data.localDate)),
@@ -154,12 +170,12 @@ export const saveEntry = createServerFn({ method: 'POST' })
 export const getDashboard = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
-      deviceId: z.string().min(12),
       fromDate: z.string().regex(dateRegex),
+      ...baseInput,
     }),
   )
   .handler(async ({ data }) => {
-    const identity = await ensureIdentity({ data: { deviceId: data.deviceId } })
+    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
     const allEntries = await db.query.entries.findMany({
       where: and(eq(entries.identityId, identity.id), gte(entries.promptDate, data.fromDate)),
@@ -186,9 +202,9 @@ export const getDashboard = createServerFn({ method: 'GET' })
   })
 
 export const exportEntries = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ deviceId: z.string().min(12) }))
+  .inputValidator(z.object(baseInput))
   .handler(async ({ data }) => {
-    const identity = await ensureIdentity({ data: { deviceId: data.deviceId } })
+    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
     const allEntries = await db.query.entries.findMany({
       where: eq(entries.identityId, identity.id),
       orderBy: asc(entries.promptDate),
