@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, gt, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, gt, or } from 'drizzle-orm'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { computeStreaks, determineNewBadges } from './badge-engine'
@@ -88,7 +88,7 @@ async function awardBadges(identityId: string, latestWordCount: number) {
   })
 
   if (toAward.length > 0) {
-    const badgeRows = await db.select().from(badges).where(sql`${badges.key} = ANY(${toAward})`)
+    const badgeRows = await db.select().from(badges).where(or(...toAward.map((key) => eq(badges.key, key))))
     if (badgeRows.length > 0) {
       await db.insert(identityBadges).values(
         badgeRows.map((row) => ({

@@ -17,7 +17,8 @@
     "db:init": "node scripts/init-db.mjs",
     "db:seed:prompts": "node scripts/seed-prompts.mjs",
     "prompts:validate": "node scripts/validate-prompts.mjs",
-    "startup:check": "node scripts/startup-check.mjs"
+    "startup:check": "node scripts/startup-check.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -37,6 +38,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
     "@tanstack/eslint-config": "latest",

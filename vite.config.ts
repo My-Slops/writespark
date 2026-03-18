@@ -15,6 +15,10 @@ const config = defineConfig({
     tanstackStart(),
     viteReact(),
   ],
+  test: {
+    include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+    exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
+  },
 })
 
 export default config
