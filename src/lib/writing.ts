@@ -200,6 +200,39 @@ export const getDashboard = createServerFn({ method: 'GET' })
     }
   })
 
+
+export const exportEntriesMarkdown = createServerFn({ method: 'GET' })
+  .inputValidator(z.object(baseInput))
+  .handler(async ({ data }) => {
+    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+    const allEntries = await db.query.entries.findMany({
+      where: eq(entries.identityId, identity.id),
+      orderBy: asc(entries.promptDate),
+    })
+
+    const lines: string[] = []
+    lines.push('# WriteSpark Export')
+    lines.push('')
+    lines.push(`- exportedAt: ${new Date().toISOString()}`)
+    lines.push(`- identityId: ${identity.id}`)
+    lines.push(`- entries: ${allEntries.length}`)
+    lines.push('')
+
+    for (const entry of allEntries) {
+      lines.push(`## ${entry.promptDate}`)
+      lines.push('')
+      lines.push(`- wordCount: ${entry.wordCount}`)
+      lines.push(`- timezone: ${entry.timezone}`)
+      lines.push('')
+      lines.push(entry.content)
+      lines.push('')
+      lines.push('---')
+      lines.push('')
+    }
+
+    return { markdown: lines.join('\n') }
+  })
+
 export const exportEntries = createServerFn({ method: 'GET' })
   .inputValidator(z.object(baseInput))
   .handler(async ({ data }) => {

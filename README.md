@@ -13,6 +13,7 @@ WriteSpark is an open-source daily writing web app that removes blank-page frict
 - Dashboard (completion + daily words + total words)
 - Badge milestones
 - JSON export
+- Markdown export
 - Notebook-style UI + dark mode + mobile-first layout
 
 ## Stack
