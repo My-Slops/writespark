@@ -1,71 +1,68 @@
 import postgres from 'postgres'
 
-const sql = postgres(process.env.DATABASE_URL ?? 'postgres://localhost:5432/writespark')
+const sql = postgres(process.env.DATABASE_URL ?? 'postgres://localhost:5432/writespark', {
+  prepare: false,
+})
+
+const ddlStatements = [
+  `create extension if not exists "pgcrypto";`,
+  `create table if not exists identities (
+    id uuid primary key default gen_random_uuid(),
+    device_id text not null unique,
+    created_at timestamptz not null default now()
+  );`,
+  `create table if not exists users (
+    id uuid primary key default gen_random_uuid(),
+    email text not null unique,
+    password_hash text not null,
+    identity_id uuid references identities(id),
+    created_at timestamptz not null default now()
+  );`,
+  `create table if not exists sessions (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id),
+    token text not null unique,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null
+  );`,
+  `create table if not exists prompts (
+    id uuid primary key default gen_random_uuid(),
+    prompt_date date not null unique,
+    title text not null,
+    body text not null,
+    created_at timestamptz not null default now()
+  );`,
+  `create table if not exists entries (
+    id uuid primary key default gen_random_uuid(),
+    identity_id uuid not null references identities(id),
+    prompt_date date not null,
+    content text not null,
+    word_count integer not null,
+    locked boolean not null default false,
+    timezone text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (identity_id, prompt_date)
+  );`,
+  `create table if not exists badges (
+    id uuid primary key default gen_random_uuid(),
+    key text not null unique,
+    name text not null,
+    description text not null
+  );`,
+  `create table if not exists identity_badges (
+    id uuid primary key default gen_random_uuid(),
+    identity_id uuid not null references identities(id),
+    badge_id uuid not null references badges(id),
+    awarded_at timestamptz not null default now(),
+    unique (identity_id, badge_id)
+  );`,
+]
 
 await sql.begin(async (tx) => {
-  await tx`
-    create extension if not exists "pgcrypto";
-
-    create table if not exists identities (
-      id uuid primary key default gen_random_uuid(),
-      device_id text not null unique,
-      created_at timestamptz not null default now()
-    );
-
-    create table if not exists users (
-      id uuid primary key default gen_random_uuid(),
-      email text not null unique,
-      password_hash text not null,
-      identity_id uuid references identities(id),
-      created_at timestamptz not null default now()
-    );
-
-
-
-    create table if not exists sessions (
-      id uuid primary key default gen_random_uuid(),
-      user_id uuid not null references users(id),
-      token text not null unique,
-      created_at timestamptz not null default now(),
-      expires_at timestamptz not null
-    );
-
-    create table if not exists prompts (
-      id uuid primary key default gen_random_uuid(),
-      prompt_date date not null unique,
-      title text not null,
-      body text not null,
-      created_at timestamptz not null default now()
-    );
-
-    create table if not exists entries (
-      id uuid primary key default gen_random_uuid(),
-      identity_id uuid not null references identities(id),
-      prompt_date date not null,
-      content text not null,
-      word_count integer not null,
-      locked boolean not null default false,
-      timezone text not null,
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      unique (identity_id, prompt_date)
-    );
-
-    create table if not exists badges (
-      id uuid primary key default gen_random_uuid(),
-      key text not null unique,
-      name text not null,
-      description text not null
-    );
-
-    create table if not exists identity_badges (
-      id uuid primary key default gen_random_uuid(),
-      identity_id uuid not null references identities(id),
-      badge_id uuid not null references badges(id),
-      awarded_at timestamptz not null default now(),
-      unique (identity_id, badge_id)
-    );
-  `
+  for (const statement of ddlStatements) {
+    await tx.unsafe(statement)
+  }
 
   await tx`
     insert into badges (key, name, description)
