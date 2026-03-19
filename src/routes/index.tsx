@@ -1,54 +1,19 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useMemo, useState } from 'react'
-import { getSessionUser, login, logout, signup } from '../lib/auth'
-import { exportEntries, exportEntriesMarkdown, getDashboard, getDayData, saveEntry } from '../lib/writing'
+import { getDayData, saveEntry } from '../lib/writing'
 import { countWords } from '../lib/writing-rules'
+import { getOrCreateDeviceId, getSessionToken } from '../lib/device'
+import { shiftDate, todayLocalDate } from '../lib/date-utils'
 
 export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>) => ({
     date: typeof search.date === 'string' ? search.date : undefined,
   }),
-  component: WriteSparkPage,
+  component: WriteSparkEditor,
 })
 
-function toIsoLocalDate(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function todayLocalDate() {
-  return toIsoLocalDate(new Date())
-}
-
-function shiftDate(localDate: string, deltaDays: number) {
-  const d = new Date(`${localDate}T12:00:00`)
-  d.setDate(d.getDate() + deltaDays)
-  return toIsoLocalDate(d)
-}
-
-function getOrCreateDeviceId() {
-  const key = 'writespark.device_id'
-  let value = window.localStorage.getItem(key)
-  if (!value) {
-    value = `guest_${crypto.randomUUID().replaceAll('-', '')}`
-    window.localStorage.setItem(key, value)
-  }
-  return value
-}
-
-function getSessionToken() {
-  return window.localStorage.getItem('writespark.session_token')
-}
-
-function setSessionToken(token: string | null) {
-  if (token) window.localStorage.setItem('writespark.session_token', token)
-  else window.localStorage.removeItem('writespark.session_token')
-}
-
-function WriteSparkPage() {
+function WriteSparkEditor() {
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
 
@@ -58,20 +23,9 @@ function WriteSparkPage() {
 
   const getDayDataFn = useServerFn(getDayData)
   const saveEntryFn = useServerFn(saveEntry)
-  const getDashboardFn = useServerFn(getDashboard)
-  const exportEntriesFn = useServerFn(exportEntries)
-  const exportEntriesMarkdownFn = useServerFn(exportEntriesMarkdown)
-  const signupFn = useServerFn(signup)
-  const loginFn = useServerFn(login)
-  const logoutFn = useServerFn(logout)
-  const getSessionUserFn = useServerFn(getSessionUser)
 
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [sessionToken, setSessionTokenState] = useState<string | null>(null)
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [emailInput, setEmailInput] = useState('')
-  const [passwordInput, setPasswordInput] = useState('')
-  const [authError, setAuthError] = useState<string | null>(null)
 
   const [content, setContent] = useState('')
   const [isLocked, setIsLocked] = useState(false)
@@ -79,14 +33,6 @@ function WriteSparkPage() {
   const [promptBody, setPromptBody] = useState('No prompt configured for this date yet.')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [dashboard, setDashboard] = useState<null | {
-    totalWords: number
-    totalDaysWritten: number
-    currentStreak: number
-    longestStreak: number
-    byDay: { date: string; wordCount: number }[]
-    badges: { key: string; name: string; description: string; awardedAt: Date }[]
-  }>(null)
 
   const wordCount = useMemo(() => countWords(content), [content])
 
@@ -96,33 +42,24 @@ function WriteSparkPage() {
   }, [])
 
   useEffect(() => {
-    if (!sessionToken) {
-      setUserEmail(null)
-      return
-    }
-    void getSessionUserFn({ data: { sessionToken } }).then((res) => setUserEmail(res.user?.email ?? null))
-  }, [getSessionUserFn, sessionToken])
-
-  useEffect(() => {
     if (!deviceId) return
 
     const load = async () => {
-      const day = await getDayDataFn({
-        data: { localDate: requestedDate, todayLocal: today, timezone, clientNowIso: new Date().toISOString(), deviceId, sessionToken: sessionToken ?? undefined },
-      })
-      setIsLocked(day.isLocked)
-      setPromptTitle(day.prompt?.title ?? 'Prompt unavailable')
-      setPromptBody(day.prompt?.body ?? 'No prompt configured for this date yet.')
-      setContent(day.entry?.content ?? '')
-
-      const dash = await getDashboardFn({
-        data: { deviceId, fromDate: '2000-01-01', sessionToken: sessionToken ?? undefined },
-      })
-      setDashboard(dash)
+      try {
+        const day = await getDayDataFn({
+          data: { localDate: requestedDate, todayLocal: today, timezone, clientNowIso: new Date().toISOString(), deviceId, sessionToken: sessionToken ?? undefined },
+        })
+        setIsLocked(day.isLocked)
+        setPromptTitle(day.prompt?.title ?? 'Prompt unavailable')
+        setPromptBody(day.prompt?.body ?? 'No prompt configured for this date yet.')
+        setContent(day.entry?.content ?? '')
+      } catch (error) {
+        console.error('Failed to load day data:', error)
+      }
     }
 
     void load()
-  }, [deviceId, getDashboardFn, getDayDataFn, requestedDate, sessionToken, timezone, today])
+  }, [deviceId, getDayDataFn, requestedDate, sessionToken, timezone, today])
 
   useEffect(() => {
     if (!deviceId || isLocked) return
@@ -159,180 +96,61 @@ function WriteSparkPage() {
     return () => clearTimeout(timeout)
   }, [content, deviceId, isLocked, requestedDate, saveEntryFn, sessionToken, timezone, today])
 
-  const exportData = async () => {
-    if (!deviceId) return
-    const data = await exportEntriesFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `writespark-export-${today}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
-
-  const exportMarkdownData = async () => {
-    if (!deviceId) return
-    const data = await exportEntriesMarkdownFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
-    const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `writespark-export-${today}.md`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const handleAuth = async (mode: 'signup' | 'login') => {
-    if (!deviceId) return
-    setAuthError(null)
-    try {
-      const fn = mode === 'signup' ? signupFn : loginFn
-      const result = await fn({ data: { email: emailInput, password: passwordInput, deviceId } })
-      setSessionToken(result.session.token)
-      setSessionTokenState(result.session.token)
-      setUserEmail(result.user.email)
-      setPasswordInput('')
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Authentication failed.')
-    }
-  }
-
-  const handleLogout = async () => {
-    if (!sessionToken) return
-    await logoutFn({ data: { sessionToken } })
-    setSessionToken(null)
-    setSessionTokenState(null)
-    setUserEmail(null)
-  }
-
   return (
-    <main className="mx-auto min-h-screen max-w-5xl p-4 md:p-8">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">WriteSpark</h1>
-          <p className="text-sm opacity-80">Notebook-style daily writing with fixed prompts and local-day locking.</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void exportData()}>
-            Export JSON
-          </button>
-          <button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void exportMarkdownData()}>
-            Export Markdown
-          </button>
-        </div>
+    <div className="mx-auto max-w-4xl p-4 md:p-8">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Daily Journal</h1>
+        <p className="text-gray-600 dark:text-gray-400">Write without overthinking. Lock your thoughts at the end of the day.</p>
       </header>
 
-      <section className="mb-6 rounded-xl border p-4">
-        <h2 className="mb-2 text-lg font-semibold">Account</h2>
-        {!userEmail ? (
-          <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto]">
-            <input
-              type="email"
-              placeholder="email"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              className="rounded border px-3 py-2"
-            />
-            <input
-              type="password"
-              placeholder="password (min 8 chars)"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              className="rounded border px-3 py-2"
-            />
-            <button className="rounded border px-3 py-2" onClick={() => void handleAuth('signup')}>
-              Sign up
-            </button>
-            <button className="rounded border px-3 py-2" onClick={() => void handleAuth('login')}>
-              Log in
-            </button>
-            {authError && <p className="md:col-span-4 text-sm text-red-600">{authError}</p>}
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <p className="text-sm">Signed in as {userEmail}</p>
-            <button className="rounded border px-3 py-2 text-sm" onClick={() => void handleLogout()}>
-              Log out
-            </button>
-          </div>
-        )}
-      </section>
-
-      <section className="mb-4 flex items-center gap-2">
-        <button className="rounded border px-3 py-1" onClick={() => navigate({ search: { date: shiftDate(requestedDate, -1) } })}>
-          ← Prev day
+      <section className="mb-6 flex items-center gap-3">
+        <button className="rounded-lg border bg-white dark:bg-zinc-800 px-4 py-2 hover:bg-gray-50 dark:hover:bg-zinc-700 transition" onClick={() => navigate({ search: { date: shiftDate(requestedDate, -1) } })}>
+          ← Previous
         </button>
-        <div className="rounded border px-3 py-1 font-medium">{requestedDate}</div>
-        <button className="rounded border px-3 py-1" onClick={() => navigate({ search: { date: shiftDate(requestedDate, 1) } })}>
-          Next day →
+        <div className="rounded-lg border px-4 py-2 font-semibold bg-gray-50 dark:bg-zinc-800">{requestedDate}</div>
+        <button className="rounded-lg border bg-white dark:bg-zinc-800 px-4 py-2 hover:bg-gray-50 dark:hover:bg-zinc-700 transition" onClick={() => navigate({ search: { date: shiftDate(requestedDate, 1) } })}>
+          Next →
         </button>
       </section>
 
-      <section className="mb-6 rounded-xl border bg-white/60 p-4 shadow-sm dark:bg-zinc-900/40">
-        <p className="mb-1 text-xs uppercase tracking-wide opacity-70">Today&apos;s Prompt</p>
-        <h2 className="mb-2 text-xl font-semibold">{promptTitle}</h2>
-        <p className="leading-relaxed opacity-90">{promptBody}</p>
+      <section className="mb-8 rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm">
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-500">Today&apos;s Prompt</p>
+        <h2 className="mb-3 text-2xl font-semibold text-gray-900 dark:text-gray-100">{promptTitle}</h2>
+        <p className="text-lg leading-relaxed text-gray-700 dark:text-gray-300">{promptBody}</p>
       </section>
 
-      <section className="mb-8 rounded-xl border bg-[repeating-linear-gradient(to_bottom,#0000,#0000_31px,rgba(148,163,184,0.25)_32px)] p-4 md:p-6 dark:bg-[repeating-linear-gradient(to_bottom,#0000,#0000_31px,rgba(71,85,105,0.45)_32px)]">
+      <section className="mb-8 rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none bg-[repeating-linear-gradient(to_bottom,transparent,transparent_31px,rgba(148,163,184,0.15)_32px)] dark:bg-[repeating-linear-gradient(to_bottom,transparent,transparent_31px,rgba(71,85,105,0.2)_32px)]" />
+        
         {isLocked && (
-          <div className="mb-3 rounded-md border border-amber-400/50 bg-amber-100/60 p-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            This day is locked. You can view your writing but cannot edit after day-end.
+          <div className="relative z-10 mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+            <p className="font-semibold flex items-center gap-2">
+              <span>🔒</span> This day is locked.
+            </p>
+            <p className="text-sm mt-1 opacity-90">You can view your writing but cannot edit after the day ends.</p>
           </div>
         )}
+
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           disabled={isLocked}
-          className="min-h-[320px] w-full resize-y bg-transparent p-2 outline-none"
-          placeholder="Start writing..."
+          className="relative z-10 min-h-[400px] w-full resize-y bg-transparent p-2 outline-none leading-8 text-gray-800 dark:text-gray-200"
+          placeholder="Start writing your thoughts here..."
         />
-        <div className="mt-3 flex items-center justify-between text-sm opacity-80">
-          <span>
+
+        <div className="relative z-10 mt-6 flex items-center justify-between border-t border-gray-100 dark:border-zinc-800 pt-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+          <span className={wordCount > 3000 ? 'text-red-500' : ''}>
             {wordCount} / 3000 words {wordCount > 3000 ? '⚠️ over limit' : ''}
           </span>
-          <span>
-            {isLocked ? 'Locked' : saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : 'Idle'}
-          </span>
+          <div className="flex items-center gap-2">
+            {saveState === 'error' && saveError && <span className="text-red-500">{saveError}</span>}
+            <span className={`px-3 py-1 rounded-full ${isLocked ? 'bg-gray-100 dark:bg-zinc-800' : saveState === 'saving' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30' : saveState === 'saved' ? 'bg-green-100 text-green-700 dark:bg-green-900/30' : saveState === 'error' ? 'bg-red-100 text-red-700 dark:bg-red-900/30' : 'bg-gray-100 dark:bg-zinc-800'}`}>
+              {isLocked ? 'Locked' : saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : 'Idle'}
+            </span>
+          </div>
         </div>
-        {saveState === 'error' && saveError && <p className="mt-2 text-xs text-red-600">{saveError}</p>}
       </section>
-
-      <section className="grid gap-4 md:grid-cols-2">
-        <article className="rounded-xl border p-4">
-          <h3 className="mb-3 text-lg font-semibold">Dashboard</h3>
-          <ul className="space-y-1 text-sm">
-            <li>Total words: {dashboard?.totalWords ?? 0}</li>
-            <li>Days written: {dashboard?.totalDaysWritten ?? 0}</li>
-            <li>Current timezone: {timezone}</li>
-            <li>Current streak: {dashboard?.currentStreak ?? 0}</li>
-            <li>Longest streak: {dashboard?.longestStreak ?? 0}</li>
-          </ul>
-          <div className="mt-3 max-h-44 overflow-auto rounded border p-2 text-sm">
-            {(dashboard?.byDay ?? []).map((d) => (
-              <div key={d.date} className="flex justify-between py-1">
-                <span>{d.date}</span>
-                <span>{d.wordCount} words</span>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="rounded-xl border p-4">
-          <h3 className="mb-3 text-lg font-semibold">Badges</h3>
-          <div className="space-y-2 text-sm">
-            {(dashboard?.badges ?? []).length === 0 && <p>No badges yet. Write today to unlock your first one.</p>}
-            {(dashboard?.badges ?? []).map((badge) => (
-              <div key={badge.key} className="rounded border p-2">
-                <p className="font-semibold">{badge.name}</p>
-                <p className="opacity-80">{badge.description}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-    </main>
+    </div>
   )
 }

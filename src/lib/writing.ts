@@ -126,7 +126,7 @@ async function awardBadges(identityId: string, latestWordCount: number): Promise
  * @returns Saved entry and progress statistics (badges, streaks, word counts)
  * @throws Error if date is locked, word count exceeds limit, or validation fails
  */
-export async function saveEntryCore(data: {
+async function saveEntryCore(data: {
   localDate: string
   todayLocal: string
   timezone: string
