@@ -10,14 +10,22 @@ services:
       - "5432:5432"
     volumes:
       - writespark-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d writespark"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   app:
     build: .
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/writespark
+    # Init and seed are idempotent, so running them on every start is safe.
+    command: ["sh", "-c", "node scripts/init-db.mjs && node scripts/seed-prompts.mjs && node server.mjs"]
     ports:
       - "3000:3000"
 
