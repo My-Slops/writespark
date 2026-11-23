@@ -1,8 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { getSessionUser, login, logout, signup } from '../lib/auth'
 import { getOrCreateDeviceId, getSessionToken, resetDeviceId, setSessionToken as saveSessionToken } from '../lib/device'
+import { SESSION_EXPIRED_MESSAGE } from '../lib/errors'
+import { clearLocalSession, handleSessionExpired } from '../lib/session-client'
 
 export const Route = createFileRoute('/account')({
   component: AccountPage,
@@ -22,6 +24,9 @@ function AccountPage() {
   const [passwordInput, setPasswordInput] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
+  /** Dates where this device's guest writing was appended to the account's entry at login. */
+  const [mergedDates, setMergedDates] = useState<string[]>([])
 
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId())
@@ -33,10 +38,41 @@ function AccountPage() {
       setUserEmail(null)
       return
     }
+    let cancelled = false
+    // The stored token is no longer valid: sign out locally (fresh guest id, as on logout).
+    const expire = () => {
+      setDeviceId(getOrCreateDeviceId())
+      setSessionTokenState(null)
+      setUserEmail(null)
+      setSessionExpired(true)
+    }
     void getSessionUserFn({ data: { sessionToken } })
-      .then((res) => setUserEmail(res.user?.email ?? null))
-      .catch((err) => console.error('Failed to get session user', err))
+      .then((res) => {
+        if (cancelled) return
+        if (res.user) {
+          setUserEmail(res.user.email)
+          return
+        }
+        clearLocalSession()
+        expire()
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (handleSessionExpired(err)) expire()
+        else console.error('Failed to get session user', err)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [getSessionUserFn, sessionToken])
+
+  const completeAuth = (token: string, email: string) => {
+    saveSessionToken(token)
+    setSessionTokenState(token)
+    setUserEmail(email)
+    setPasswordInput('')
+    setSessionExpired(false)
+  }
 
   const handleAuth = async (mode: 'signup' | 'login') => {
     if (!deviceId) return
@@ -44,17 +80,21 @@ function AccountPage() {
       setAuthError('Email and password are required')
       return
     }
-    
+
     setAuthError(null)
+    setMergedDates([])
     setIsLoading(true)
-    
+
     try {
-      const fn = mode === 'signup' ? signupFn : loginFn
-      const result = await fn({ data: { email: emailInput, password: passwordInput, deviceId } })
-      saveSessionToken(result.session.token)
-      setSessionTokenState(result.session.token)
-      setUserEmail(result.user.email)
-      setPasswordInput('')
+      const data = { email: emailInput, password: passwordInput, deviceId }
+      if (mode === 'signup') {
+        const result = await signupFn({ data })
+        completeAuth(result.session.token, result.user.email)
+      } else {
+        const result = await loginFn({ data })
+        completeAuth(result.session.token, result.user.email)
+        setMergedDates(result.mergedDates)
+      }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Authentication failed.')
     } finally {
@@ -75,6 +115,7 @@ function AccountPage() {
       setDeviceId(resetDeviceId())
       setSessionTokenState(null)
       setUserEmail(null)
+      setMergedDates([])
       setIsLoading(false)
     }
   }
@@ -93,7 +134,29 @@ function AccountPage() {
           </div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">You are signed in</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-8 font-medium">{userEmail}</p>
-          
+
+          {mergedDates.length > 0 && (
+            <div data-testid="merge-note" role="status" className="mb-8 rounded-lg border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-900 dark:border-blue-900/30 dark:bg-blue-950/20 dark:text-blue-200">
+              <p>
+                We added your guest writing to your existing entries for:{' '}
+                {mergedDates.map((date, i) => (
+                  <span key={date}>
+                    {i > 0 && ', '}
+                    <Link to="/" search={{ date }} className="font-semibold underline underline-offset-2">
+                      {date}
+                    </Link>
+                  </span>
+                ))}
+                .
+              </p>
+              <p className="mt-2">
+                <Link to="/" search={{ date: undefined }} className="font-semibold underline underline-offset-2">
+                  Open your journal
+                </Link>
+              </p>
+            </div>
+          )}
+
           <button 
             disabled={isLoading}
             onClick={() => void handleLogout()}
@@ -109,6 +172,12 @@ function AccountPage() {
             <p className="text-sm text-gray-500 mt-2">WriteSpark works as a guest, but creating an account lets you access your entries across devices.</p>
           </div>
           
+          {sessionExpired && !authError && (
+            <div data-testid="session-expired" role="status" className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              {SESSION_EXPIRED_MESSAGE}
+            </div>
+          )}
+
           {authError && (
             <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600 dark:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/50">
               {authError}

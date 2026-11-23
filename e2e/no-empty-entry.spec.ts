@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
 test('opening the editor does not create an empty entry', async ({ page }) => {
@@ -6,9 +7,17 @@ test('opening the editor does not create an empty entry', async ({ page }) => {
 
   // Longer than the autosave debounce.
   await page.waitForTimeout(2_000)
-  await expect(page.getByTestId('save-status')).not.toHaveAttribute('data-state', 'error')
+  await expect(page.getByTestId('save-status')).toHaveAttribute('data-state', 'idle')
 
-  await page.goto('/dashboard')
-  await expect(page.getByTestId('stat-days-written')).toHaveText('0')
-  await expect(page.getByTestId('dashboard-error')).toHaveCount(0)
+  // The JSON export returns every stored row for this identity, including 0-word ones.
+  await page.goto('/history')
+  const exportButton = page.getByTestId('export-json')
+  await expect(exportButton).toBeEnabled()
+  const downloadPromise = page.waitForEvent('download')
+  await exportButton.click()
+  const download = await downloadPromise
+
+  const exported = JSON.parse(await readFile(await download.path(), 'utf8')) as { entries: Array<unknown> }
+  expect(exported.entries).toEqual([])
+  await expect(page.getByTestId('export-error')).toHaveCount(0)
 })

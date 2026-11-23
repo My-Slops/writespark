@@ -3,6 +3,7 @@ import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { exportEntries, exportEntriesMarkdown } from '../lib/writing'
 import { getOrCreateDeviceId, getSessionToken } from '../lib/device'
+import { SessionExpiredBanner, handleSessionExpired } from '../lib/session-client'
 import { todayLocalDate } from '../lib/date-utils'
 
 export const Route = createFileRoute('/history')({
@@ -17,6 +18,7 @@ function HistoryPage() {
   const [sessionToken, setSessionToken] = useState<string | null>(null)
 
   const [exportError, setExportError] = useState<string | null>(null)
+  const [sessionExpired, setSessionExpired] = useState(false)
 
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId())
@@ -24,7 +26,7 @@ function HistoryPage() {
   }, [])
 
   const exportData = async () => {
-    if (!deviceId) return
+    if (!deviceId || sessionExpired) return
     const today = todayLocalDate()
     setExportError(null)
     try {
@@ -37,13 +39,17 @@ function HistoryPage() {
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (e) {
+      if (handleSessionExpired(e)) {
+        setSessionExpired(true)
+        return
+      }
       console.error('Failed to export JSON', e)
       setExportError(`JSON export failed: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
   }
 
   const exportMarkdownData = async () => {
-    if (!deviceId) return
+    if (!deviceId || sessionExpired) return
     const today = todayLocalDate()
     setExportError(null)
     try {
@@ -56,6 +62,10 @@ function HistoryPage() {
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (e) {
+      if (handleSessionExpired(e)) {
+        setSessionExpired(true)
+        return
+      }
       console.error('Failed to export Markdown', e)
       setExportError(`Markdown export failed: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
@@ -67,6 +77,8 @@ function HistoryPage() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">History & Data</h1>
         <p className="mt-2 text-gray-600 dark:text-gray-400">Export your journal entries and view past writings.</p>
       </header>
+
+      {sessionExpired && <SessionExpiredBanner className="mb-6" detail="Log in to export your entries." />}
 
       <section className="mb-10">
         <div className="rounded-2xl border bg-white dark:bg-zinc-900 p-8 shadow-sm text-center">
@@ -80,14 +92,18 @@ function HistoryPage() {
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
+              data-testid="export-json"
+              disabled={!deviceId || sessionExpired}
               onClick={() => void exportData()}
-              className="w-full sm:w-auto px-6 py-3 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 font-medium hover:bg-gray-50 dark:hover:bg-zinc-700 transition flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 py-3 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 font-medium hover:bg-gray-50 dark:hover:bg-zinc-700 transition flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <span>{'{ }'}</span> JSON Export
             </button>
             <button 
+              data-testid="export-markdown"
+              disabled={!deviceId || sessionExpired}
               onClick={() => void exportMarkdownData()}
-              className="w-full sm:w-auto px-6 py-3 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 font-medium hover:bg-gray-50 dark:hover:bg-zinc-700 transition flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 py-3 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 font-medium hover:bg-gray-50 dark:hover:bg-zinc-700 transition flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <span>📄</span> Markdown Export
             </button>
