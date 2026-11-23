@@ -6,17 +6,25 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM deps AS build
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 
-FROM node:22-alpine AS runtime
-WORKDIR /app
-RUN corepack enable
+FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod
-COPY --from=build /app/.output ./.output
-COPY --from=build /app/dist ./dist
-EXPOSE 3000
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
 ENV NODE_ENV=production
-CMD ["node", ".output/server/index.mjs"]
+ENV PORT=3000
+COPY package.json ./
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY server.mjs ./
+COPY scripts ./scripts
+COPY prompts ./prompts
+USER node
+EXPOSE 3000
+CMD ["node", "server.mjs"]

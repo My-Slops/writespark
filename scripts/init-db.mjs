@@ -1,11 +1,11 @@
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL ?? 'postgres://localhost:5432/writespark', {
+  onnotice: () => {},
   prepare: false,
 })
 
 const ddlStatements = [
-  `create extension if not exists "pgcrypto";`,
   `create table if not exists identities (
     id uuid primary key default gen_random_uuid(),
     device_id text not null unique,
@@ -79,6 +79,17 @@ await sql.begin(async (tx) => {
       ('entries_30', '30 Writing Days', 'Completed writing on 30 days.')
     on conflict (key) do nothing;
   `
+
+  // Idempotent data migrations (safe to run on every start).
+  // Account identities no longer share a device_id with a guest device.
+  await tx`
+    update identities i
+    set device_id = 'account_' || u.id::text
+    from users u
+    where u.identity_id = i.id and left(i.device_id, 6) = 'guest_';
+  `
+  // A past bug created empty (0-word) entries on page load.
+  await tx`delete from entries where word_count = 0;`
 })
 
 console.log('Database initialized.')

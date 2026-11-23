@@ -1,0 +1,15 @@
+node_modules
+dist
+.output
+.nitro
+.tanstack
+.git
+.github
+.serena
+test-results
+playwright-report
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

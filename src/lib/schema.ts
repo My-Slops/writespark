@@ -1,4 +1,5 @@
-import { boolean, date, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+// Mirrors scripts/init-db.mjs (the DDL source of truth); change both together.
+import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const identities = pgTable('identities', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -14,13 +15,19 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
-export const sessions = pgTable('sessions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id),
-  token: text('token').notNull().unique(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-})
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    token: text('token').notNull().unique(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    expiresAtIdx: index('idx_sessions_expires_at').on(table.expiresAt),
+  }),
+)
 
 export const prompts = pgTable('prompts', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -65,6 +72,7 @@ export const identityBadges = pgTable(
   },
   (table) => ({
     uniq: uniqueIndex('identity_badges_unique').on(table.identityId, table.badgeId),
+    identityIdIdx: index('idx_identity_badges_identity_id').on(table.identityId),
   }),
 )
 
