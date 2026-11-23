@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { getSessionUser, login, logout, signup } from '../lib/auth'
-import { getOrCreateDeviceId, getSessionToken, setSessionToken as saveSessionToken } from '../lib/device'
+import { getOrCreateDeviceId, getSessionToken, resetDeviceId, setSessionToken as saveSessionToken } from '../lib/device'
 
 export const Route = createFileRoute('/account')({
   component: AccountPage,
@@ -67,12 +67,14 @@ function AccountPage() {
     setIsLoading(true)
     try {
       await logoutFn({ data: { sessionToken } })
-      saveSessionToken(null)
-      setSessionTokenState(null)
-      setUserEmail(null)
     } catch (e) {
       console.error('Logout failed', e)
     } finally {
+      // Always clear local state; become a fresh guest (shared-device safety).
+      saveSessionToken(null)
+      setDeviceId(resetDeviceId())
+      setSessionTokenState(null)
+      setUserEmail(null)
       setIsLoading(false)
     }
   }
@@ -140,14 +142,14 @@ function AccountPage() {
 
             <div className="flex flex-col sm:flex-row gap-3 pt-4">
               <button 
-                disabled={isLoading}
+                disabled={isLoading || !deviceId}
                 className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition disabled:opacity-50 dark:focus:ring-offset-zinc-900" 
                 onClick={() => void handleAuth('login')}
               >
                 {isLoading ? 'Processing...' : 'Log in'}
               </button>
               <button 
-                disabled={isLoading}
+                disabled={isLoading || !deviceId}
                 className="flex-1 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-2.5 font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-zinc-700 transition disabled:opacity-50" 
                 onClick={() => void handleAuth('signup')}
               >

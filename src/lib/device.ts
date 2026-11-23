@@ -1,11 +1,24 @@
+import { DEVICE_ID_RE } from './validation'
+
+const DEVICE_KEY = 'writespark.device_id'
+
+function generateDeviceId() {
+  return `guest_${crypto.randomUUID().replaceAll('-', '')}`
+}
+
 export function getOrCreateDeviceId() {
-  const key = 'writespark.device_id'
-  let value = window.localStorage.getItem(key)
-  if (!value) {
-    value = `guest_${crypto.randomUUID().replaceAll('-', '')}`
-    window.localStorage.setItem(key, value)
-  }
-  return value
+  const value = window.localStorage.getItem(DEVICE_KEY)
+  if (value && DEVICE_ID_RE.test(value)) return value
+  const fresh = generateDeviceId()
+  window.localStorage.setItem(DEVICE_KEY, fresh)
+  return fresh
+}
+
+/** Store a brand-new device id (e.g. after logout on a shared device) and return it. */
+export function resetDeviceId(): string {
+  const fresh = generateDeviceId()
+  window.localStorage.setItem(DEVICE_KEY, fresh)
+  return fresh
 }
 
 export function getSessionToken() {
