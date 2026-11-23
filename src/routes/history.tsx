@@ -16,6 +16,8 @@ function HistoryPage() {
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [sessionToken, setSessionToken] = useState<string | null>(null)
 
+  const [exportError, setExportError] = useState<string | null>(null)
+
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId())
     setSessionToken(getSessionToken())
@@ -24,6 +26,7 @@ function HistoryPage() {
   const exportData = async () => {
     if (!deviceId) return
     const today = todayLocalDate()
+    setExportError(null)
     try {
       const data = await exportEntriesFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -35,12 +38,14 @@ function HistoryPage() {
       URL.revokeObjectURL(url)
     } catch (e) {
       console.error('Failed to export JSON', e)
+      setExportError(`JSON export failed: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
   }
 
   const exportMarkdownData = async () => {
     if (!deviceId) return
     const today = todayLocalDate()
+    setExportError(null)
     try {
       const data = await exportEntriesMarkdownFn({ data: { deviceId, sessionToken: sessionToken ?? undefined } })
       const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' })
@@ -52,6 +57,7 @@ function HistoryPage() {
       URL.revokeObjectURL(url)
     } catch (e) {
       console.error('Failed to export Markdown', e)
+      setExportError(`Markdown export failed: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
   }
 
@@ -86,6 +92,12 @@ function HistoryPage() {
               <span>📄</span> Markdown Export
             </button>
           </div>
+
+          {exportError && (
+            <p data-testid="export-error" role="alert" className="mt-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-100">
+              {exportError}
+            </p>
+          )}
         </div>
       </section>
       

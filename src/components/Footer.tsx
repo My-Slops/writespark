@@ -12,6 +12,9 @@ export default function Footer() {
           <a href="https://github.com/My-Slops/writespark" target="_blank" rel="noreferrer" className="hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
             GitHub
           </a>
+          <Link to="/about" className="hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+            About
+          </Link>
           <Link to="/history" className="sm:hidden hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
             History
           </Link>

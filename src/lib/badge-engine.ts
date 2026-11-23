@@ -18,28 +18,38 @@ function toEpochDay(date: string) {
   return Math.floor(Date.UTC(y, m - 1, d) / 86400000)
 }
 
-export function computeStreaks(entries: ProgressEntry[]) {
-  if (entries.length === 0) return { currentStreak: 0, longestStreak: 0 }
-
-  const sorted = [...entries].sort((a, b) => a.promptDate.localeCompare(b.promptDate))
+/**
+ * Compute streaks from written days only.
+ * Entries with wordCount <= 0 are ignored and duplicate dates collapse.
+ * The current streak is 0 unless the latest written day is `today` or the
+ * day before `today`; otherwise it counts back over consecutive days.
+ */
+export function computeStreaks(entries: ProgressEntry[], today: string) {
+  const days = [...new Set(entries.filter((e) => e.wordCount > 0).map((e) => toEpochDay(e.promptDate)))].sort(
+    (a, b) => a - b,
+  )
+  if (days.length === 0) return { currentStreak: 0, longestStreak: 0 }
 
   let longestStreak = 1
   let running = 1
-  for (let i = 1; i < sorted.length; i++) {
-    const diff = toEpochDay(sorted[i].promptDate) - toEpochDay(sorted[i - 1].promptDate)
-    if (diff === 1) {
+  for (let i = 1; i < days.length; i++) {
+    if (days[i] - days[i - 1] === 1) {
       running += 1
       longestStreak = Math.max(longestStreak, running)
-    } else if (diff > 1) {
+    } else {
       running = 1
     }
   }
 
-  let currentStreak = 1
-  for (let i = sorted.length - 1; i > 0; i--) {
-    const diff = toEpochDay(sorted[i].promptDate) - toEpochDay(sorted[i - 1].promptDate)
-    if (diff === 1) currentStreak += 1
-    else break
+  let currentStreak = 0
+  const latest = days[days.length - 1]
+  const todayDay = toEpochDay(today)
+  if (latest === todayDay || latest === todayDay - 1) {
+    currentStreak = 1
+    for (let i = days.length - 1; i > 0; i--) {
+      if (days[i] - days[i - 1] === 1) currentStreak += 1
+      else break
+    }
   }
 
   return { currentStreak, longestStreak }
@@ -49,11 +59,13 @@ export function determineNewBadges(input: {
   entries: ProgressEntry[]
   latestWordCount: number
   alreadyAwarded: Set<string>
+  today: string
 }): BadgeKey[] {
-  const { entries, latestWordCount, alreadyAwarded } = input
+  const { latestWordCount, alreadyAwarded, today } = input
+  const entries = input.entries.filter((e) => e.wordCount > 0)
   const totalEntries = entries.length
   const totalWords = entries.reduce((acc, e) => acc + e.wordCount, 0)
-  const { currentStreak } = computeStreaks(entries)
+  const { currentStreak } = computeStreaks(entries, today)
 
   const result: BadgeKey[] = []
 

@@ -17,7 +17,7 @@ export function assertIsoDate(date: string, fieldName: string) {
 export function localDateForInstant(instantIso: string, timezone: string) {
   const instant = new Date(instantIso)
   if (Number.isNaN(instant.getTime())) {
-    throw new Error('clientNowIso must be a valid ISO timestamp.')
+    throw new Error('instant must be a valid ISO timestamp.')
   }
 
   return new Intl.DateTimeFormat('en-CA', {
@@ -28,16 +28,22 @@ export function localDateForInstant(instantIso: string, timezone: string) {
   }).format(instant)
 }
 
-export function assertTodayLocalConsistent(input: {
-  todayLocal: string
-  timezone: string
-  clientNowIso: string
-}) {
-  assertIsoDate(input.todayLocal, 'todayLocal')
-  const derived = localDateForInstant(input.clientNowIso, input.timezone)
-  if (derived !== input.todayLocal) {
-    throw new Error(
-      `todayLocal (${input.todayLocal}) does not match clientNowIso (${input.clientNowIso}) in timezone (${input.timezone}). Expected ${derived}.`,
-    )
-  }
+/**
+ * The server-trusted "today" (YYYY-MM-DD) in the given IANA timezone.
+ *
+ * Trade-off (accepted): the client still chooses its timezone, so a caller can
+ * only ever write to a date that is "today" somewhere on Earth, i.e. at most
+ * +/- 1 day from the server's UTC date. Past days beyond that stay locked.
+ *
+ * Note: the `entries.locked` column is not authoritative; lock state is
+ * derived on read as `localDate !== serverTodayFor(timezone)`.
+ */
+export function serverTodayFor(timezone: string, now: Date = new Date()): string {
+  return localDateForInstant(now.toISOString(), timezone)
+}
+
+/** Days since 1970-01-01 UTC for a YYYY-MM-DD date. */
+export function epochDay(date: string): number {
+  const [y, m, d] = date.split('-').map(Number)
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000)
 }

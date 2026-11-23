@@ -14,6 +14,7 @@ function DashboardPage() {
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [sessionToken, setSessionToken] = useState<string | null>(null)
   
+  const [error, setError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<null | {
     totalWords: number
     totalDaysWritten: number
@@ -34,11 +35,13 @@ function DashboardPage() {
     const load = async () => {
       try {
         const dash = await getDashboardFn({
-          data: { deviceId, fromDate: '2000-01-01', sessionToken: sessionToken ?? undefined },
+          data: { deviceId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, sessionToken: sessionToken ?? undefined },
         })
         setDashboard(dash)
+        setError(null)
       } catch (e) {
         console.error('Failed to load dashboard', e)
+        setError(e instanceof Error ? e.message : 'Failed to load dashboard.')
       }
     }
 
@@ -52,22 +55,29 @@ function DashboardPage() {
         <p className="mt-2 text-gray-600 dark:text-gray-400">Track your writing consistency and achievements over time.</p>
       </header>
 
+      {error && (
+        <div data-testid="dashboard-error" role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-100">
+          <p className="font-semibold">Could not load your dashboard.</p>
+          <p className="text-sm mt-1 opacity-90">{error}</p>
+        </div>
+      )}
+
       <div className="grid gap-6 md:grid-cols-4 mb-10">
         <div className="rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm">
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Words</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.totalWords ?? 0}</p>
+          <p data-testid="stat-total-words" className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.totalWords ?? 0}</p>
         </div>
         <div className="rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm">
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Days Written</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.totalDaysWritten ?? 0}</p>
+          <p data-testid="stat-days-written" className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.totalDaysWritten ?? 0}</p>
         </div>
         <div className="rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm">
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Current Streak</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.currentStreak ?? 0} <span className="text-lg font-normal text-gray-500">days</span></p>
+          <p data-testid="stat-current-streak" className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.currentStreak ?? 0} <span className="text-lg font-normal text-gray-500">days</span></p>
         </div>
         <div className="rounded-2xl border bg-white dark:bg-zinc-900 p-6 shadow-sm">
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Longest Streak</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.longestStreak ?? 0} <span className="text-lg font-normal text-gray-500">days</span></p>
+          <p data-testid="stat-longest-streak" className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{dashboard?.longestStreak ?? 0} <span className="text-lg font-normal text-gray-500">days</span></p>
         </div>
       </div>
 
