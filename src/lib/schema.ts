@@ -11,7 +11,11 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
-  identityId: uuid('identity_id').references(() => identities.id),
+  // One account per identity. Existing databases get this as a unique index from init-db.mjs
+  // (skipped, with a warning, while legacy duplicates exist).
+  identityId: uuid('identity_id')
+    .references(() => identities.id)
+    .unique('users_identity_id_unique'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 

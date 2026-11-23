@@ -7,6 +7,7 @@ import { db } from './db'
 import { badges, entries, identityBadges, prompts } from './schema'
 import { resolveIdentity } from './identity'
 import { CONFIG } from './config'
+import { PublicError, withPublicErrors } from './errors'
 import { deviceIdSchema, isoDateSchema, sessionTokenSchema, timezoneSchema } from './validation'
 
 const baseInput = {
@@ -47,38 +48,42 @@ async function promptForDate(localDate: string): Promise<{ title: string; body: 
  * The lock state is derived from the server clock: only the date that is
  * "today" in `timezone` (server-computed) is writable.
  *
- * @param localDate - Date in YYYY-MM-DD format
+ * @param localDate - Optional date in YYYY-MM-DD format; defaults to the server-derived today
  * @param timezone - IANA timezone identifier
  * @param deviceId - Device identifier
  * @param sessionToken - Optional session token
- * @returns Prompt (exact or rotated fallback, or null), entry (or null), lock status, and server-derived today
+ * @returns Resolved date, prompt (exact or rotated fallback, or null), entry (or null), lock status, and server-derived today
  */
-export const getDayData = createServerFn({ method: 'GET' })
+export const getDayData = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
-      localDate: isoDateSchema,
+      localDate: isoDateSchema.optional(),
       timezone: timezoneSchema,
       ...baseInput,
     }),
   )
-  .handler(async ({ data }) => {
-    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
-    const today = serverTodayFor(data.timezone)
+  .handler(
+    withPublicErrors(async ({ data }) => {
+      const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+      const today = serverTodayFor(data.timezone)
+      const date = data.localDate ?? today
 
-    const prompt = await promptForDate(data.localDate)
-    const entry =
-      (await db.query.entries.findFirst({
-        where: and(eq(entries.identityId, identity.id), eq(entries.promptDate, data.localDate)),
-      })) ?? null
+      const prompt = await promptForDate(date)
+      const entry =
+        (await db.query.entries.findFirst({
+          where: and(eq(entries.identityId, identity.id), eq(entries.promptDate, date)),
+        })) ?? null
 
-    return {
-      prompt,
-      entry,
-      isLocked: data.localDate !== today,
-      isToday: data.localDate === today,
-      today,
-    }
-  })
+      return {
+        date,
+        prompt,
+        entry,
+        isLocked: date !== today,
+        isToday: date === today,
+        today,
+      }
+    }),
+  )
 
 async function awardBadges(
   identityId: string,
@@ -149,18 +154,19 @@ async function saveEntryCore(data: {
   deviceId: string
   sessionToken?: string
 }) {
+  // Resolve first so an invalid session is always reported as expired.
+  const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+
   // Lock is derived from the server clock; `entries.locked` is never read.
   const today = serverTodayFor(data.timezone)
   if (data.localDate !== today) {
-    throw new Error('You can only write for the current local day. Past days are locked.')
+    throw new PublicError('You can only write for the current local day. Past days are locked.')
   }
 
   const wordCount = countWords(data.content)
   if (wordCount > CONFIG.WORD_LIMIT_PER_ENTRY) {
-    throw new Error(`Entry exceeds ${CONFIG.WORD_LIMIT_PER_ENTRY}-word limit.`)
+    throw new PublicError(`Entry exceeds ${CONFIG.WORD_LIMIT_PER_ENTRY}-word limit.`)
   }
-
-  const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
   if (wordCount === 0) {
     await db.delete(entries).where(and(eq(entries.identityId, identity.id), eq(entries.promptDate, data.localDate)))
@@ -196,7 +202,7 @@ async function saveEntryCore(data: {
  *
  * @param localDate - Date in YYYY-MM-DD format (must be today in `timezone`)
  * @param timezone - IANA timezone identifier
- * @param content - Entry content (max 3000 words)
+ * @param content - Entry content (max 3000 words, max CONFIG.MAX_CONTENT_CHARS characters)
  * @param deviceId - Device identifier
  * @param sessionToken - Optional session token
  * @returns Saved entry (null if blank) and progress statistics
@@ -207,13 +213,11 @@ export const saveEntry = createServerFn({ method: 'POST' })
     z.object({
       localDate: isoDateSchema,
       timezone: timezoneSchema,
-      content: z.string().max(CONFIG.WORD_LIMIT_PER_ENTRY * 10),
+      content: z.string().max(CONFIG.MAX_CONTENT_CHARS),
       ...baseInput,
     }),
   )
-  .handler(async ({ data }) => {
-    return saveEntryCore(data)
-  })
+  .handler(withPublicErrors(async ({ data }) => saveEntryCore(data)))
 
 /**
  * Retrieve dashboard statistics and writing history (0-word entries ignored).
@@ -223,105 +227,110 @@ export const saveEntry = createServerFn({ method: 'POST' })
  * @param sessionToken - Optional session token
  * @returns Total words, days written, streaks, daily breakdown, and badges
  */
-export const getDashboard = createServerFn({ method: 'GET' })
+export const getDashboard = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
       timezone: timezoneSchema,
       ...baseInput,
     }),
   )
-  .handler(async ({ data }) => {
-    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+  .handler(
+    withPublicErrors(async ({ data }) => {
+      const identity = await resolveIdentity(data.deviceId, data.sessionToken)
 
-    const rows = await db.query.entries.findMany({
-      where: eq(entries.identityId, identity.id),
-      orderBy: asc(entries.promptDate),
-    })
-    const written = rows.filter((entry) => entry.wordCount > 0)
+      const rows = await db.query.entries.findMany({
+        where: eq(entries.identityId, identity.id),
+        orderBy: asc(entries.promptDate),
+      })
+      const written = rows.filter((entry) => entry.wordCount > 0)
 
-    const totalWords = written.reduce((acc, entry) => acc + entry.wordCount, 0)
-    const badgesWon = await db
-      .select({ key: badges.key, name: badges.name, description: badges.description, awardedAt: identityBadges.awardedAt })
-      .from(identityBadges)
-      .innerJoin(badges, eq(identityBadges.badgeId, badges.id))
-      .where(eq(identityBadges.identityId, identity.id))
-      .orderBy(asc(identityBadges.awardedAt))
+      const totalWords = written.reduce((acc, entry) => acc + entry.wordCount, 0)
+      const badgesWon = await db
+        .select({ key: badges.key, name: badges.name, description: badges.description, awardedAt: identityBadges.awardedAt })
+        .from(identityBadges)
+        .innerJoin(badges, eq(identityBadges.badgeId, badges.id))
+        .where(eq(identityBadges.identityId, identity.id))
+        .orderBy(asc(identityBadges.awardedAt))
 
-    const normalizedEntries = written.map((entry) => ({ promptDate: entry.promptDate, wordCount: entry.wordCount }))
-    const { currentStreak, longestStreak } = computeStreaks(normalizedEntries, serverTodayFor(data.timezone))
+      const normalizedEntries = written.map((entry) => ({ promptDate: entry.promptDate, wordCount: entry.wordCount }))
+      const { currentStreak, longestStreak } = computeStreaks(normalizedEntries, serverTodayFor(data.timezone))
 
-    return {
-      totalWords,
-      totalDaysWritten: written.length,
-      currentStreak,
-      longestStreak,
-      byDay: written.map((entry) => ({
-        date: entry.promptDate,
-        wordCount: entry.wordCount,
-      })),
-      badges: badgesWon,
-    }
-  })
-
+      return {
+        totalWords,
+        totalDaysWritten: written.length,
+        currentStreak,
+        longestStreak,
+        byDay: written.map((entry) => ({
+          date: entry.promptDate,
+          wordCount: entry.wordCount,
+        })),
+        badges: badgesWon,
+      }
+    }),
+  )
 
 /**
  * Export all entries as formatted Markdown.
- * 
+ *
  * @param deviceId - Device identifier
  * @param sessionToken - Optional session token
  * @returns Markdown-formatted export of all entries
  */
-export const exportEntriesMarkdown = createServerFn({ method: 'GET' })
+export const exportEntriesMarkdown = createServerFn({ method: 'POST' })
   .inputValidator(z.object(baseInput))
-  .handler(async ({ data }) => {
-    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
-    const allEntries = await db.query.entries.findMany({
-      where: eq(entries.identityId, identity.id),
-      orderBy: asc(entries.promptDate),
-    })
+  .handler(
+    withPublicErrors(async ({ data }) => {
+      const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+      const allEntries = await db.query.entries.findMany({
+        where: eq(entries.identityId, identity.id),
+        orderBy: asc(entries.promptDate),
+      })
 
-    const lines: string[] = []
-    lines.push('# WriteSpark Export')
-    lines.push('')
-    lines.push(`- exportedAt: ${new Date().toISOString()}`)
-    lines.push(`- identityId: ${identity.id}`)
-    lines.push(`- entries: ${allEntries.length}`)
-    lines.push('')
+      const lines: string[] = []
+      lines.push('# WriteSpark Export')
+      lines.push('')
+      lines.push(`- exportedAt: ${new Date().toISOString()}`)
+      lines.push(`- identityId: ${identity.id}`)
+      lines.push(`- entries: ${allEntries.length}`)
+      lines.push('')
 
-    for (const entry of allEntries) {
-      lines.push(`## ${entry.promptDate}`)
-      lines.push('')
-      lines.push(`- wordCount: ${entry.wordCount}`)
-      lines.push(`- timezone: ${entry.timezone}`)
-      lines.push('')
-      lines.push(entry.content)
-      lines.push('')
-      lines.push('---')
-      lines.push('')
-    }
+      for (const entry of allEntries) {
+        lines.push(`## ${entry.promptDate}`)
+        lines.push('')
+        lines.push(`- wordCount: ${entry.wordCount}`)
+        lines.push(`- timezone: ${entry.timezone}`)
+        lines.push('')
+        lines.push(entry.content)
+        lines.push('')
+        lines.push('---')
+        lines.push('')
+      }
 
-    return { markdown: lines.join('\n') }
-  })
+      return { markdown: lines.join('\n') }
+    }),
+  )
 
 /**
  * Export all entries as JSON.
- * 
+ *
  * @param deviceId - Device identifier
  * @param sessionToken - Optional session token
  * @returns JSON export with metadata and all entries
  */
-export const exportEntries = createServerFn({ method: 'GET' })
+export const exportEntries = createServerFn({ method: 'POST' })
   .inputValidator(z.object(baseInput))
-  .handler(async ({ data }) => {
-    const identity = await resolveIdentity(data.deviceId, data.sessionToken)
-    const allEntries = await db.query.entries.findMany({
-      where: eq(entries.identityId, identity.id),
-      orderBy: asc(entries.promptDate),
-    })
+  .handler(
+    withPublicErrors(async ({ data }) => {
+      const identity = await resolveIdentity(data.deviceId, data.sessionToken)
+      const allEntries = await db.query.entries.findMany({
+        where: eq(entries.identityId, identity.id),
+        orderBy: asc(entries.promptDate),
+      })
 
-    return {
-      exportedAt: new Date().toISOString(),
-      identityId: identity.id,
-      entries: allEntries,
-    }
-  })
+      return {
+        exportedAt: new Date().toISOString(),
+        identityId: identity.id,
+        entries: allEntries,
+      }
+    }),
+  )

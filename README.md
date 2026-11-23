@@ -41,6 +41,12 @@ The `db:*`, `startup:check` and `start` scripts load `.env` automatically. `vite
 - Past days are read-only (locked); only today can be edited.
 - If no prompt is configured for a date, one is picked deterministically from the existing prompts, so the same date always shows the same prompt.
 
+## Accounts
+- Signing up adopts this device's guest entries into the new account; the device then starts a fresh guest.
+- Logging in moves the device's guest entries into the account. If the account already has an entry for the same date, the guest text is appended below it after a `---` line, never dropped (even past the word limit; the editor then asks you to trim before the next save).
+- If a request carries a session that is unknown or expired, the server answers "Your session has expired. Please log in again." instead of quietly saving into the device's guest identity.
+- Login and signup are rate limited in process memory: 10 failed logins per email and client IP, 50 per email across all IPs, 30 failed logins per IP (successful logins don't count) and 30 signups per IP, each per 15 minutes (`src/lib/config.ts`). While a limit is hit, logins are refused without checking the password.
+
 ## Validation and tests
 
 ```bash
@@ -68,12 +74,14 @@ pnpm build
 pnpm db:init && pnpm db:seed:prompts
 pnpm start          # node server.mjs, listens on PORT (default 3000)
 ```
-`pnpm build` writes `dist/client` and `dist/server/server.js`. `server.mjs` (using [srvx](https://srvx.h3.dev)) serves `dist/client` statics and forwards other requests to the TanStack Start fetch handler. Set `PORT` / `HOST` to change the listen address. Behind a reverse proxy, set `TRUST_PROXY=true` so auth rate limits use the real client IP (see [docs/self-hosting.md](docs/self-hosting.md)).
+`pnpm build` writes `dist/client` and `dist/server/server.js`. `server.mjs` (using [srvx](https://srvx.h3.dev)) serves `dist/client` statics and forwards other requests to the TanStack Start fetch handler. Set `PORT` / `HOST` to change the listen address. Behind a reverse proxy you must set `TRUST_PROXY=true`, otherwise every client shares the proxy's IP for rate limiting; the server logs a one-time warning when it sees `X-Forwarded-For` without it (see [docs/self-hosting.md](docs/self-hosting.md)).
 
 Add your own process manager or reverse proxy (systemd, Caddy, nginx, etc.) for TLS and restarts. See [docs/self-hosting.md](docs/self-hosting.md).
 
 ### Database schema
 `scripts/init-db.mjs` is the source of truth for the schema and also applies small idempotent data migrations; `src/lib/schema.ts` mirrors it for Drizzle. Change both together.
+
+`users.identity_id` is unique (one account per identity). Existing databases get the `users_identity_id_unique` index on the next `init-db` run. If an older bug already left several accounts sharing one identity, the script skips the index, prints a warning with the count and a query to find them, and changes nothing; detach the extra accounts by hand (for example `identity_id = NULL`) and run it again.
 
 ## Prompt configuration
 Edit `prompts/calendar-prompts.json`, validate, then seed:

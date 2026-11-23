@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { countWords, epochDay, isDateLocked, localDateForInstant, serverTodayFor } from './writing-rules'
+import {
+  MERGE_SEPARATOR,
+  appendGuestContent,
+  countWords,
+  epochDay,
+  isDateLocked,
+  localDateForInstant,
+  serverTodayFor,
+} from './writing-rules'
 
 describe('writing rules', () => {
   it('counts words from plain text', () => {
@@ -42,5 +50,33 @@ describe('writing rules', () => {
     expect(epochDay('1970-01-01')).toBe(0)
     expect(epochDay('1970-01-02')).toBe(1)
     expect(epochDay('1969-12-31')).toBe(-1)
+  })
+
+  describe('appendGuestContent', () => {
+    it('appends guest text after the account text with a separator', () => {
+      expect(appendGuestContent('account words', 'guest words')).toBe('account words\n\n---\n\nguest words')
+      expect(MERGE_SEPARATOR).toBe('\n\n---\n\n')
+    })
+
+    it('keeps both texts verbatim (no trimming of either side)', () => {
+      expect(appendGuestContent('line one\n', '  indented')).toBe('line one\n' + MERGE_SEPARATOR + '  indented')
+    })
+
+    it('appends even when the result exceeds the word limit', () => {
+      const account = Array.from({ length: 2990 }, () => 'a').join(' ')
+      const guest = Array.from({ length: 50 }, () => 'g').join(' ')
+      const merged = appendGuestContent(account, guest)
+      expect(countWords(merged)).toBe(2990 + 50 + 1) // "---" counts as a word
+      expect(merged.endsWith(guest)).toBe(true)
+    })
+
+    it('leaves the account text unchanged for blank or identical guest text', () => {
+      expect(appendGuestContent('account', '   \n')).toBe('account')
+      expect(appendGuestContent('same text', 'same text\n')).toBe('same text')
+    })
+
+    it('uses the guest text alone when the account text is blank', () => {
+      expect(appendGuestContent('  ', 'guest')).toBe('guest')
+    })
   })
 })

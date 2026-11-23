@@ -16,7 +16,12 @@ export const deviceIdSchema = z.string().regex(DEVICE_ID_RE, 'Invalid device id.
 
 export const sessionTokenSchema = z.string().min(CONFIG.SESSION_TOKEN_MIN_LENGTH).max(256)
 
+// IANA zone names only (e.g. "UTC", "America/Toronto", "Etc/GMT+12"). Intl also accepts raw
+// offsets like "+23:59", which would widen the writable-date window beyond real time zones.
+const IANA_ZONE_RE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/
+
 export function isValidTimeZone(timezone: string): boolean {
+  if (!IANA_ZONE_RE.test(timezone)) return false
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: timezone })
     return true

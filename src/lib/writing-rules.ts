@@ -47,3 +47,19 @@ export function epochDay(date: string): number {
   const [y, m, d] = date.split('-').map(Number)
   return Math.floor(Date.UTC(y, m - 1, d) / 86400000)
 }
+
+/** Separator placed between an account entry and guest text appended to it on login. */
+export const MERGE_SEPARATOR = '\n\n---\n\n'
+
+/**
+ * Text for an account entry after a guest entry for the same date is merged
+ * into it on login. The guest text is appended (never dropped), even when the
+ * result exceeds the word limit; the editor then asks the user to trim it.
+ * Blank or identical guest text leaves the account text unchanged.
+ */
+export function appendGuestContent(accountContent: string, guestContent: string): string {
+  const guest = guestContent.trim()
+  if (!guest || guest === accountContent.trim()) return accountContent
+  if (!accountContent.trim()) return guestContent
+  return accountContent + MERGE_SEPARATOR + guestContent
+}
